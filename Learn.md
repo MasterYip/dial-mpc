@@ -233,6 +233,242 @@ This approach:
 
 This design allows DIAL-MPC to efficiently sample and evaluate hundreds of potential trajectories in milliseconds, which is crucial for the diffusion-based optimization approach that requires many samples for effective trajectory planning.
 
+# Environment Vectorization in DIAL-MPC
+
+DIAL-MPC leverages Brax's physics engine and JAX's functional programming paradigm to create efficient, vectorized robotic environments. Using the UnitreeGo2Env as an example, we can see how the environment is structured to enable parallel simulation and efficient control.
+
+## Environment Architecture
+
+The environment hierarchy follows a well-structured inheritance pattern:
+
+1. **PipelineEnv (Brax)**: The base class from Brax that handles physics simulation
+2. **BaseEnv**: A DIAL-MPC specific base class that adds common functionality
+3. **UnitreeGo2Env**: The specific implementation for the Go2 quadruped robot
+
+This layered approach allows for code reuse while maintaining environment-specific behaviors.
+
+## Key Components of UnitreeGo2Env
+
+The UnitreeGo2Env initializes several important components:
+
+```python
+def __init__(self, config: UnitreeGo2EnvConfig):
+    super().__init__(config)
+    
+    # Robot configurations
+    self._foot_radius = 0.0175
+    
+    # Gait configurations
+    self._gait = config.gait
+    self._gait_phase = {
+        "stand": jnp.zeros(4),
+        "walk": jnp.array([0.0, 0.5, 0.75, 0.25]),
+        "trot": jnp.array([0.0, 0.5, 0.5, 0.0]),
+        "canter": jnp.array([0.0, 0.33, 0.33, 0.66]),
+        "gallop": jnp.array([0.0, 0.05, 0.4, 0.35]),
+    }
+    self._gait_params = {
+        # ratio, cadence, amplitude
+        "stand": jnp.array([1.0, 1.0, 0.0]),
+        "walk": jnp.array([0.75, 1.0, 0.08]),
+        "trot": jnp.array([0.45, 2, 0.08]),
+        "canter": jnp.array([0.4, 4, 0.06]),
+        "gallop": jnp.array([0.3, 3.5, 0.10]),
+    }
+    
+    # Robot model references
+    self._torso_idx = mujoco.mj_name2id(
+        self.sys.mj_model, mujoco.mjtObj.mjOBJ_BODY.value, "base"
+    )
+    
+    # Initial state and constraints
+    self._init_q = jnp.array(self.sys.mj_model.keyframe("home").qpos)
+    self._default_pose = self.sys.mj_model.keyframe("home").qpos[7:]
+    self.joint_range = jnp.array([...])  # Defines range of motion for each joint
+```
+
+## Vectorizable Operations
+
+The environment is designed with JAX's functional programming model in mind:
+
+1. **Pure Functions**: Methods like `step`, `reset`, and `_get_obs` are pure functions that take a state and return a new state without side effects
+2. **jit Compilation**: Functions are decorated with `@jax.jit` or `@functools.partial(jax.jit, static_argnums=(0,))` for faster execution
+3. **Array Manipulation**: All operations use JAX NumPy (`jnp`) rather than regular NumPy for GPU/TPU acceleration
+
+## Integration with Brax Physics
+
+The environment interacts with Brax's physics engine through:
+
+```python
+def make_system(self, config: UnitreeGo2EnvConfig) -> System:
+    model_path = get_model_path("unitree_go2", "mjx_scene_force.xml")
+    sys = mjcf.load(model_path)
+    sys = sys.tree_replace({"opt.timestep": config.timestep})
+    return sys
+```
+
+This creates a physics system based on an MJCF (MuJoCo) model file, which is then used by Brax for simulation.
+
+## State and Action Processing
+
+Actions undergo a transformation process to map from normalized control inputs to robot-specific joint angles or torques:
+
+```python
+def act2joint(self, act: jax.Array) -> jax.Array:
+    act_normalized = (act * self._config.action_scale + 1.0) / 2.0
+    joint_targets = self.joint_range[:, 0] + act_normalized * (
+        self.joint_range[:, 1] - self.joint_range[:, 0]
+    )
+    joint_targets = jnp.clip(
+        joint_targets,
+        self.physical_joint_range[:, 0],
+        self.physical_joint_range[:, 1],
+    )
+    return joint_targets
+```
+
+## Reward Computation
+
+The reward function combines multiple objectives to guide the robot behavior:
+
+```python
+# Simplified reward computation from UnitreeGo2Env
+reward = (
+    reward_gaits * 0.1
+    + reward_air_time * 0.0
+    + reward_pos * 0.0
+    + reward_upright * 0.5
+    + reward_yaw * 0.3
+    + reward_vel * 1.0
+    + reward_ang_vel * 1.0
+    + reward_height * 1.0
+    + reward_energy * 0.00
+    + reward_alive * 0.0
+)
+```
+
+This weighted sum approach enables multi-objective optimization with configurable priorities.
+
+## Batch Simulation with JAX
+
+The environment itself doesn't directly implement batching, but is designed to be compatible with JAX's vectorization. In DIAL-MPC, this happens through:
+
+```python
+# In MBDPI class
+self.rollout_us = jax.jit(functools.partial(rollout_us, self.env.step))
+self.rollout_us_vmap = jax.jit(jax.vmap(self.rollout_us, in_axes=(None, 0)))
+```
+
+This vectorizes the environment's `step` function, allowing multiple control trajectories to be evaluated in parallel from the same initial state.
+
+## Benefits of Environment Vectorization
+
+1. **Performance**: Simulation of multiple trajectories in parallel on GPU/TPU
+2. **Determinism**: Pure functional approach ensures reproducible results
+3. **Efficiency**: JAX's compilation optimizes the execution for specific hardware
+4. **Scalability**: Batch size can be adjusted based on available compute resources
+
+The environment design in DIAL-MPC demonstrates how modern robotics simulation can leverage JAX's functional programming model and hardware acceleration to enable efficient trajectory optimization through massively parallel simulation.
+
+# Physics System and State Separation in Brax
+
+A key insight into how DIAL-MPC efficiently handles batch environment simulation lies in understanding Brax's architecture and JAX's functional programming model. Let's examine why environments can support batch rollout simply by applying `vmap` to `env.step` without needing to copy the physics system data.
+
+## System vs. State Separation
+
+In Brax and DIAL-MPC, there's a crucial separation between:
+
+1. **Physics System (`sys`)**: Contains static parameters like the robot model, joint limits, and collision properties
+2. **Environment State (`state`)**: Contains dynamic variables like positions, velocities, and rewards
+
+Looking at `UnitreeGo2Env.make_system()`:
+
+```python
+def make_system(self, config: UnitreeGo2EnvConfig) -> System:
+    model_path = get_model_path("unitree_go2", "mjx_scene_force.xml")
+    sys = mjcf.load(model_path)
+    sys = sys.tree_replace({"opt.timestep": config.timestep})
+    return sys
+```
+
+This method creates the physics system once during initialization. The system is then used as a reference (essentially as a constant) during simulation.
+
+## Functional Design Pattern
+
+Brax environments follow a pure functional design. The `step` method in `UnitreeGo2Env`:
+
+```python
+def step(self, state: State, action: jax.Array) -> State:
+    # ...
+    pipeline_state = self.pipeline_step(state.pipeline_state, ctrl)
+    # ...
+    state = state.replace(
+        pipeline_state=pipeline_state, obs=obs, reward=reward, done=done
+    )
+    return state
+```
+
+This method:
+1. Takes a state and action as input
+2. Computes a new state without modifying any environment variables
+3. Returns the new state
+
+The `self` reference contains the physics system, but it's used as a read-only reference.
+
+## Why Data Copying Isn't Needed
+
+When JAX applies `vmap` to `rollout_us`:
+
+```python
+self.rollout_us_vmap = jax.jit(jax.vmap(self.rollout_us, in_axes=(None, 0)))
+```
+
+JAX can efficiently vectorize without copying the physics system because:
+
+1. **Immutable Data Structures**: JAX uses immutable arrays, so there's no risk of one batch element modifying data used by another
+2. **Read-Only System References**: The physics system is referenced but never modified during simulation
+3. **Pure Functions**: All computations create new outputs rather than modifying inputs
+
+## Under the Hood: JAX's Implementation
+
+What's happening under the hood:
+
+```
+┌─────────────────────────────────────────┐
+│              Physics System             │
+│  (Robot model, joint limits, collision) │
+└────────────────────┬────────────────────┘
+                     │ Reference (not copied)
+                     ▼
+┌─────────────────────────────────────────┐
+│           Environment Step fn           │
+│     (Takes state and action as input)   │
+└────────────────────┬────────────────────┘
+                     │ vmapped
+                     ▼
+┌─────────────────────────────────────────┐
+│         Parallel Computation            │
+│  State₁  State₂  State₃  ...  Stateₙ   │
+│  Action₁ Action₂ Action₃ ... Actionₙ   │
+└────────────────────┬────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────┐
+│         New States & Rewards            │
+└─────────────────────────────────────────┘
+```
+
+During compilation, JAX's tracing mechanism recognizes that the physics system parameters are constants with respect to the batch elements, so it optimizes the computation to avoid redundant operations.
+
+## Benefits of This Approach
+
+1. **Memory Efficiency**: Only one copy of the potentially large physics system exists
+2. **Computational Efficiency**: Hardware accelerators (GPUs/TPUs) can process many trajectories in parallel
+3. **Programming Simplicity**: Environment authors don't need to manually manage batching
+4. **Optimization Opportunities**: JAX can apply optimizations like common subexpression elimination across batch elements
+
+This architecture explains why DIAL-MPC can efficiently evaluate hundreds of trajectory candidates in parallel without facing memory bottlenecks from duplicating the physics system for each sample.
+
 # Understanding DIAL-MPC's Main Logic
 
 The `main()` function in `dial_mpc/core/dial_core.py` implements the core execution flow of the DIAL-MPC (Diffusion-Based Iterative Linear Model Predictive Control) algorithm. Here's a breakdown of the main logic:
