@@ -16,7 +16,7 @@ import jax
 from jax import numpy as jnp
 from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
 import functools
-
+from jax import debug
 from brax.io import html
 import brax.envs as brax_envs
 
@@ -41,6 +41,15 @@ def rollout_us(step_env, state, us):
     _, (rews, pipline_states) = jax.lax.scan(step, state, us)
     return rews, pipline_states
 
+# def scan(f, init, xs, length=None):
+#   if xs is None:
+#     xs = [None] * length
+#   carry = init
+#   ys = []
+#   for x in xs:
+#     carry, y = f(carry, x)
+#     ys.append(y)
+#   return carry, np.stack(ys)
 
 @jax.jit
 def softmax_update(weights, Y0s, sigma, mu_0t):
@@ -66,6 +75,8 @@ class MBDPI:
         self.sigma_control = (
             args.horizon_diffuse_factor ** jnp.arange(args.Hnode + 1)[::-1]
         )
+        print(f"sigma_control = {self.sigma_control}")
+        print(f"sigmas = {self.sigmas}")
 
         # node to u
         self.ctrl_dt = 0.02
@@ -137,8 +148,14 @@ class MBDPI:
             "qdbar": qdbar,
             "xbar": xbar,
             "new_noise_scale": new_noise_scale,
+            "norm_diff": jnp.linalg.norm(Ybar - Ybar_i),  # Store the norm in info for printing outside
         }
 
+        # For JAX debugging with actual values, use explicit format string with named arguments
+        norm_diff = jnp.linalg.norm(Ybar - Ybar_i)
+        debug.print("Ybar - Ybar_i norm: {x}", x=norm_diff)
+        debug.print("rews: {x}", x=rews.std())
+        debug.print("sum of weights: {x}",x=jnp.sum(weights))
         return rng, Ybar, info
 
     def reverse(self, state, YN, rng):
@@ -150,6 +167,13 @@ class MBDPI:
                     state, rng, Yi, self.sigmas[i] * jnp.ones(self.args.Hnode + 1)
                 )
                 Yi.block_until_ready()
+                # Access and print the actual value outside the jitted function
+                # if "norm_diff" in rews:
+                #     norm_diff = jax.device_get(rews["norm_diff"])
+                #     print(f"Actual norm difference: {norm_diff:.6f}")
+                if "rews" in rews:
+                    rews = jax.device_get(rews["rews"])
+                    print(f"Actual rewards: {rews:.6f}")
                 freq = 1 / (time.time() - t0)
                 pbar.set_postfix({"rew": f"{rews.mean():.2e}", "freq": f"{freq:.2f}"})
         return Yi
@@ -256,6 +280,7 @@ def main():
             traj_diffuse_factors = (
                 mbdpi.sigma_control * dial_config.traj_diffuse_factor ** (jnp.arange(n_diffuse))[:, None]
             )
+            print(f"traj_diffuse_factors = {traj_diffuse_factors}")
             (rng, Y0, _), info = jax.lax.scan(
                 reverse_scan, (rng, Y0, state), traj_diffuse_factors
             )
