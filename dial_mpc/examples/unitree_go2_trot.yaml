@@ -1,7 +1,7 @@
 # DIAL-MPC
 seed: 0
 output_dir: unitree_go2_trot
-n_steps: 400
+n_steps: 80
 
 env_name: unitree_go2_walk
 Nsample: 2048

@@ -247,6 +247,21 @@ class UnitreeGo2Env(BaseEnv):
         done |= pipeline_state.x.pos[self._torso_idx - 1, 2] < 0.18
         done = done.astype(jnp.float32)
 
+        # Store reward components in metrics for debugging
+        metrics = {
+            "reward_gaits": reward_gaits,
+            "reward_air_time": reward_air_time,
+            "reward_pos": reward_pos,
+            "reward_upright": reward_upright,
+            "reward_yaw": reward_yaw,
+            "reward_vel": reward_vel,
+            "reward_ang_vel": reward_ang_vel,
+            "reward_height": reward_height,
+            "reward_energy": reward_energy,
+            "reward_alive": reward_alive,
+            "reward_total": reward,
+        }
+
         # state management
         state.info["step"] += 1
         state.info["rng"] = rng
@@ -256,7 +271,7 @@ class UnitreeGo2Env(BaseEnv):
         state.info["last_contact"] = contact
 
         state = state.replace(
-            pipeline_state=pipeline_state, obs=obs, reward=reward, done=done
+            pipeline_state=pipeline_state, obs=obs, reward=reward, done=done, metrics=metrics
         )
         return state
 
@@ -450,8 +465,8 @@ class UnitreeGo2SeqJumpEnv(UnitreeGo2Env):
         # contact reward
         reward_contact = 0.0
         penalty_contact = pipeline_state.contact.dist <= 0.001
-        reward_1 = lambda x: 1.0 * x
-        reward_0 = lambda x: 0.0
+        def reward_1(x): return 1.0 * x
+        def reward_0(x): return 0.0
         contact_targets = state.info["contact_targets"]
         contact_target_radius = state.info["contact_target_radius"]
         for i in range(4):
@@ -504,6 +519,20 @@ class UnitreeGo2SeqJumpEnv(UnitreeGo2Env):
         done |= pipeline_state.x.pos[self._torso_idx - 1, 2] < 0.1
         done = done.astype(jnp.float32)
 
+        # Store reward components in metrics for debugging
+        metrics = {
+            "reward_gaits": reward_gaits,
+            "reward_pos": reward_pos,
+            "reward_upright": reward_upright,
+            "reward_yaw": reward_yaw,
+            "reward_contact": reward_contact,
+            "reward_energy": reward_energy,
+            "reward_ctrl_rate": reward_ctrl_rate,
+            "reward_alive": reward_alive,
+            "penalty_contact": penalty_contact,
+            "reward_total": reward,
+        }
+
         # state management
         state.info["step"] += 1
         state.info["rng"] = rng
@@ -516,7 +545,7 @@ class UnitreeGo2SeqJumpEnv(UnitreeGo2Env):
         state.info["last_ctrl"] = ctrl
 
         state = state.replace(
-            pipeline_state=pipeline_state, obs=obs, reward=reward, done=done
+            pipeline_state=pipeline_state, obs=obs, reward=reward, done=done, metrics=metrics
         )
         return state
 
@@ -745,8 +774,8 @@ class UnitreeGo2CrateEnv(UnitreeGo2Env):
         # contact reward
         reward_contact = 0.0
         penalty_contact = pipeline_state.contact.dist <= 0.001
-        reward_1 = lambda x: 1.0 * x
-        reward_0 = lambda x: 0.0
+        def reward_1(x): return 1.0 * x
+        def reward_0(x): return 0.0
         contact_indices = [16, 17, 18, 19]
         for i in range(4):
             # contact_idx = 26 + 4 + 2 + 2 * 2 * (i+1) + i
@@ -783,6 +812,22 @@ class UnitreeGo2CrateEnv(UnitreeGo2Env):
         )
         # jax.debug.print("{geom}", geom=pipeline_state.contact.geom)
 
+        # Store reward components in metrics for debugging
+        metrics = {
+            "reward_gaits": reward_gaits,
+            "reward_pos": reward_pos,
+            "reward_upright": reward_upright,
+            "reward_yaw": reward_yaw,
+            "reward_vel": reward_vel,
+            "reward_height": reward_height,
+            "reward_energy": reward_energy,
+            "reward_pitch": reward_pitch,
+            "reward_roll": reward_roll,
+            "reward_contact": reward_contact,
+            "penalty_contact": penalty_contact,
+            "reward_total": reward,
+        }
+
         # state management
         state.info["step"] += 1
         state.info["rng"] = rng
@@ -790,7 +835,7 @@ class UnitreeGo2CrateEnv(UnitreeGo2Env):
         state.info["z_feet_tar"] = z_feet_tar
 
         state = state.replace(
-            pipeline_state=pipeline_state, obs=obs, reward=reward, done=done
+            pipeline_state=pipeline_state, obs=obs, reward=reward, done=done, metrics=metrics
         )
         return state
 
