@@ -162,8 +162,7 @@ class MBDPI:
                 # metrics_seq[key] has shape (n_trajectories, n_timesteps)
                 component_values = metrics_seq[key]
                 # Compute weighted mean across trajectories, then mean across timesteps
-                weighted_component = jnp.einsum("n,nt->t", weights, component_values).mean()
-                mean_reward_components[key] = weighted_component
+                mean_reward_components[key] = component_values[-1][0]  # Get the last one (mean trajectory)
 
 
         info = {
@@ -308,7 +307,8 @@ def main():
             for component_name, component_value in final_reward_components.items():
                 if component_name not in reward_components_history:
                     reward_components_history[component_name] = []
-                reward_components_history[component_name].append(component_value[-1])
+                # Get the first value of the component (mean trajectory)
+                reward_components_history[component_name].append(component_value[0])
 
             rews_plan.append(info["rews"][-1].mean())
             infos.append(info)

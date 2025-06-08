@@ -69,6 +69,7 @@ Run an example:
 
 ```bash
 dial-mpc --example unitree_h1_jog
+dial-mpc --example unitree_go2_trot
 ```
 
 After rollout completes, go to `127.0.0.1:5000` to visualize the rollouts.
