@@ -33,7 +33,9 @@ from typing import Dict, List, Tuple, Any, Optional, Union
 
 # Import trajectory gradient sampling module
 sys.path.append('/home/user/CodeSpace/Python/PredictiveDiffusionPlanner_Dev/')
+
 from traj_sampling.traj_grad_sampling import TrajGradSampling, TrajGradSamplingCfg
+
 
 # Set matplotlib to not use LaTeX and use a safe style
 try:
@@ -100,20 +102,28 @@ class MBDPITest:
             main_env_indices=main_env_indices
         )
         
-        # Keep original JAX rollout for single trajectory evaluation
+        # Apply JAX JIT compilation to environment rollout functions (like in original dial_core.py)
         self.rollout_us = jax.jit(functools.partial(rollout_us, self.env.step))
+        self.rollout_us_vmap = jax.jit(jax.vmap(self.rollout_us, in_axes=(None, 0)))
         
         print(f"MBDPITest initialized with PyTorch trajectory optimization")
         print(f"Device: {self.device}")
         print(f"Horizon samples: {args.Hsample}, Horizon nodes: {args.Hnode}")
         print(f"Num samples: {args.Nsample}, Update method: {args.update_method}")
+        print(f"JAX JIT compiled rollout functions for improved performance")
 
     def jax_to_torch(self, jax_array):
         """Convert JAX array to PyTorch tensor."""
+        if isinstance(jax_array, torch.Tensor):
+            # Already a PyTorch tensor, just move to correct device
+            return jax_array.to(self.device)
         return torch.from_numpy(np.array(jax_array)).to(self.device)
     
     def torch_to_jax(self, torch_tensor):
         """Convert PyTorch tensor to JAX array."""
+        if not isinstance(torch_tensor, torch.Tensor):
+            # Already a JAX array or numpy array
+            return jnp.array(torch_tensor)
         return jnp.array(torch_tensor.cpu().numpy())
     
     def create_rollout_callback(self, state):
@@ -126,7 +136,7 @@ class MBDPITest:
             Callback function that can evaluate trajectory batches
         """
         def rollout_callback(us_batch_torch):
-            """Evaluate a batch of control sequences.
+            """Evaluate a batch of control sequences efficiently using JAX vectorization.
             
             Args:
                 us_batch_torch: Batch of control sequences [batch_size, horizon, action_dim]
@@ -134,19 +144,16 @@ class MBDPITest:
             Returns:
                 Batch of trajectory rewards [batch_size, horizon]
             """
-            batch_size = us_batch_torch.shape[0]
-            horizon = us_batch_torch.shape[1]
+            # Convert entire batch to JAX at once (more efficient)
+            us_batch_jax = self.torch_to_jax(us_batch_torch)
             
-            # Convert to JAX and evaluate each trajectory
-            rewards_batch = []
+            # Use JAX vectorized rollout for efficient batch evaluation
+            # This is much faster than looping over individual trajectories
+            rews_batch, _, _ = self.rollout_us_vmap(state, us_batch_jax)
             
-            for i in range(batch_size):
-                us_jax = self.torch_to_jax(us_batch_torch[i])
-                rews, _, _ = self.rollout_us(state, us_jax)
-                rewards_batch.append(self.jax_to_torch(rews))
+            # Convert results back to PyTorch
+            rewards_batch = self.jax_to_torch(rews_batch)
             
-            # Stack results
-            rewards_batch = torch.stack(rewards_batch, dim=0)
             return rewards_batch
         
         return rollout_callback
@@ -208,7 +215,7 @@ class MBDPITest:
             "mean_traj_reward": rews.mean(),
             "reward_components": mean_reward_components,
         }
-        
+        print(f"Reverse step completed with rews shape: {rews.shape}, ")
         return Ybar_updated, info
     
     def reverse(self, state, YN, rng=None):
@@ -446,7 +453,8 @@ def main():
 
             # Also create a single plot with all components
             plt.figure(figsize=(12, 8))
-            colors = cm.tab10(np.linspace(0, 1, len(reward_components_history)))
+            # Use a safe colormap that definitely exists
+            colors = plt.cm.get_cmap('tab10')(np.linspace(0, 1, len(reward_components_history)))
             for i, (component_name, values) in enumerate(reward_components_history.items()):
                 clean_name = component_name.replace("reward_", "").title()
                 plt.plot(values, color=colors[i], linewidth=2, label=clean_name, alpha=0.8)
