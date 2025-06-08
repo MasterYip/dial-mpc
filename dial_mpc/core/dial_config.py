@@ -20,3 +20,5 @@ class DialConfig:
     horizon_diffuse_factor: float = 0.9
     traj_diffuse_factor: float = 0.5  # factor to scale the sigma of trajectory diffuse
     update_method: str = "mppi"  # update method
+    # interpolation method selection for dial_core_test.py
+    use_jax_spline: bool = True  # True: JAX spline interpolation, False: PyTorch linear interpolation

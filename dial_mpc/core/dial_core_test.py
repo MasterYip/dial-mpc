@@ -74,6 +74,9 @@ class MBDPITest:
         self.nu = env.action_size
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
+        # Add option to choose interpolation method
+        self.use_jax_spline = getattr(args, 'use_jax_spline', True)  # Default to JAX spline
+        
         # Create trajectory gradient sampling configuration
         self.traj_cfg = TrajGradSamplingCfg()
         self.traj_cfg.trajectory_opt.horizon_samples = args.Hsample
@@ -106,12 +109,53 @@ class MBDPITest:
         self.rollout_us = jax.jit(functools.partial(rollout_us, self.env.step))
         self.rollout_us_vmap = jax.jit(jax.vmap(self.rollout_us, in_axes=(None, 0)))
         
+        # Initialize JAX spline interpolation functions if selected
+        if self.use_jax_spline:
+            self._init_jax_spline_functions()
+            interpolation_method = "JAX spline"
+        else:
+            interpolation_method = "PyTorch linear"
+        
         print(f"MBDPITest initialized with PyTorch trajectory optimization")
         print(f"Device: {self.device}")
+        print(f"Interpolation method: {interpolation_method}")
         print(f"Horizon samples: {args.Hsample}, Horizon nodes: {args.Hnode}")
         print(f"Num samples: {args.Nsample}, Update method: {args.update_method}")
         print(f"JAX JIT compiled rollout functions for improved performance")
 
+    def _init_jax_spline_functions(self):
+        """Initialize JAX spline interpolation functions like in the original dial_core.py"""
+        from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
+        
+        # Initialize time steps for interpolation (same as original MBDPI)
+        self.ctrl_dt = 0.02
+        self.step_us = jnp.linspace(0, self.ctrl_dt * self.args.Hsample, self.args.Hsample + 1)
+        self.step_nodes = jnp.linspace(0, self.ctrl_dt * self.args.Hsample, self.args.Hnode + 1)
+        self.node_dt = self.ctrl_dt * (self.args.Hsample) / (self.args.Hnode)
+        
+        # Create JAX spline interpolation functions (same as original MBDPI)
+        @functools.partial(jax.jit, static_argnums=(0,))
+        def jax_node2u(self, nodes):
+            spline = InterpolatedUnivariateSpline(self.step_nodes, nodes, k=2)
+            us = spline(self.step_us)
+            return us
+        
+        @functools.partial(jax.jit, static_argnums=(0,))
+        def jax_u2node(self, us):
+            spline = InterpolatedUnivariateSpline(self.step_us, us, k=2)
+            nodes = spline(self.step_nodes)
+            return nodes
+        
+        # Bind the methods to self
+        self.jax_node2u = jax_node2u.__get__(self, type(self))
+        self.jax_u2node = jax_u2node.__get__(self, type(self))
+        
+        # Create vectorized versions (same as original MBDPI)
+        self.jax_node2u_vmap = jax.jit(jax.vmap(self.jax_node2u, in_axes=(1), out_axes=(1)))
+        self.jax_u2node_vmap = jax.jit(jax.vmap(self.jax_u2node, in_axes=(1), out_axes=(1)))
+        self.jax_node2u_vvmap = jax.jit(jax.vmap(self.jax_node2u_vmap, in_axes=(0)))
+        self.jax_u2node_vvmap = jax.jit(jax.vmap(self.jax_u2node_vmap, in_axes=(0)))
+    
     def jax_to_torch(self, jax_array):
         """Convert JAX array to PyTorch tensor."""
         if isinstance(jax_array, torch.Tensor):
@@ -125,6 +169,60 @@ class MBDPITest:
             # Already a JAX array or numpy array
             return jnp.array(torch_tensor)
         return jnp.array(torch_tensor.cpu().numpy())
+    
+    def node2u(self, nodes_torch):
+        """Convert control nodes to dense control sequence.
+        
+        Args:
+            nodes_torch: Control nodes as PyTorch tensor [Hnode+1, action_dim]
+            
+        Returns:
+            Dense control sequence as PyTorch tensor [Hsample+1, action_dim]
+        """
+        if self.use_jax_spline:
+            # Use JAX spline interpolation (like original dial_core.py)
+            nodes_jax = self.torch_to_jax(nodes_torch)
+            us_jax = self.jax_node2u_vmap(nodes_jax)
+            return self.jax_to_torch(us_jax)
+        else:
+            # Use PyTorch linear interpolation (like traj_grad_sampling.py)
+            return self.traj_sampler.node2u(nodes_torch)
+    
+    def u2node(self, us_torch):
+        """Convert dense control sequence to control nodes.
+        
+        Args:
+            us_torch: Dense control sequence as PyTorch tensor [Hsample+1, action_dim]
+            
+        Returns:
+            Control nodes as PyTorch tensor [Hnode+1, action_dim]
+        """
+        if self.use_jax_spline:
+            # Use JAX spline interpolation (like original dial_core.py)
+            us_jax = self.torch_to_jax(us_torch)
+            nodes_jax = self.jax_u2node_vmap(us_jax)
+            return self.jax_to_torch(nodes_jax)
+        else:
+            # Use PyTorch linear interpolation (like traj_grad_sampling.py)
+            return self.traj_sampler.u2node(us_torch)
+    
+    def node2u_batch(self, nodes_batch_torch):
+        """Convert batch of control nodes to dense control sequences.
+        
+        Args:
+            nodes_batch_torch: Batch of control nodes [batch_size, Hnode+1, action_dim]
+            
+        Returns:
+            Batch of dense control sequences [batch_size, Hsample+1, action_dim]
+        """
+        if self.use_jax_spline:
+            # Use JAX spline interpolation (like original dial_core.py)
+            nodes_batch_jax = self.torch_to_jax(nodes_batch_torch)
+            us_batch_jax = self.jax_node2u_vvmap(nodes_batch_jax)
+            return self.jax_to_torch(us_batch_jax)
+        else:
+            # Use PyTorch linear interpolation (like traj_grad_sampling.py)
+            return self.traj_sampler.node2u_batch(nodes_batch_torch)
     
     def create_rollout_callback(self, state):
         """Create a rollout callback function for trajectory optimization.
@@ -187,8 +285,8 @@ class MBDPITest:
         # Convert back to JAX
         Ybar_updated = self.torch_to_jax(updated_traj_torch.squeeze(0))
         
-        # Evaluate the updated trajectory to get additional info
-        us_updated = self.traj_sampler.node2u(updated_traj_torch.squeeze(0))
+        # Evaluate the updated trajectory to get additional info using the chosen interpolation method
+        us_updated = self.node2u(updated_traj_torch.squeeze(0))
         us_updated_jax = self.torch_to_jax(us_updated)
         rews, pipeline_states, metrics_seq = self.rollout_us(state, us_updated_jax)
         
@@ -215,7 +313,6 @@ class MBDPITest:
             "mean_traj_reward": rews.mean(),
             "reward_components": mean_reward_components,
         }
-        print(f"Reverse step completed with rews shape: {rews.shape}, ")
         return Ybar_updated, info
     
     def reverse(self, state, YN, rng=None):
@@ -250,7 +347,7 @@ class MBDPITest:
         return Yi_optimized
     
     def shift(self, Y):
-        """Shift trajectory by one timestep using PyTorch implementation.
+        """Shift trajectory by one timestep using the chosen interpolation method.
         
         Args:
             Y: Trajectory to shift
@@ -258,15 +355,23 @@ class MBDPITest:
         Returns:
             Shifted trajectory
         """
-        # Convert to PyTorch, shift, and convert back
-        Y_torch = self.jax_to_torch(Y)
-        Y_shifted_torch = self.traj_sampler.shift_nodetraj_batch(
-            Y_torch.unsqueeze(0), n_steps=1
-        ).squeeze(0)
-        return self.torch_to_jax(Y_shifted_torch)
+        if self.use_jax_spline:
+            # Use JAX spline interpolation (like original dial_core.py)
+            u = self.jax_node2u_vmap(Y)
+            u = jnp.roll(u, -1, axis=0)
+            u = u.at[-1].set(jnp.zeros(self.nu))
+            Y_shifted = self.jax_u2node_vmap(u)
+            return Y_shifted
+        else:
+            # Convert to PyTorch, shift, and convert back
+            Y_torch = self.jax_to_torch(Y)
+            Y_shifted_torch = self.traj_sampler.shift_nodetraj_batch(
+                Y_torch.unsqueeze(0), n_steps=1
+            ).squeeze(0)
+            return self.torch_to_jax(Y_shifted_torch)
     
     def shift_Y_from_u(self, u, n_step):
-        """Shift trajectory from control sequence.
+        """Shift trajectory from control sequence using the chosen interpolation method.
         
         Args:
             u: Control sequence
@@ -275,17 +380,24 @@ class MBDPITest:
         Returns:
             Shifted trajectory in node representation
         """
-        # Convert to PyTorch
-        u_torch = self.jax_to_torch(u)
-        
-        # Shift the control sequence
-        u_shifted = torch.roll(u_torch, -n_step, dims=0)
-        u_shifted[-n_step:] = 0.0  # Zero out the last n_step controls
-        
-        # Convert to node representation
-        Y_shifted_torch = self.traj_sampler.u2node(u_shifted)
-        
-        return self.torch_to_jax(Y_shifted_torch)
+        if self.use_jax_spline:
+            # Use JAX spline interpolation (like original dial_core.py)
+            u_shifted = jnp.roll(u, -n_step, axis=0)
+            u_shifted = u_shifted.at[-n_step:].set(jnp.zeros_like(u_shifted[-n_step:]))
+            Y_shifted = self.jax_u2node_vmap(u_shifted)
+            return Y_shifted
+        else:
+            # Convert to PyTorch
+            u_torch = self.jax_to_torch(u)
+            
+            # Shift the control sequence
+            u_shifted = torch.roll(u_torch, -n_step, dims=0)
+            u_shifted[-n_step:] = 0.0  # Zero out the last n_step controls
+            
+            # Convert to node representation
+            Y_shifted_torch = self.u2node(u_shifted)
+            
+            return self.torch_to_jax(Y_shifted_torch)
 
 
 def main():
