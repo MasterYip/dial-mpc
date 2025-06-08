@@ -1,34 +1,35 @@
 import os
 import sys
-import time
-import yaml
 import argparse
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-import matplotlib
 import numpy as np
-import torch
-import emoji
-import art
-
-# Add the legged_gym_cmp path to import the trajectory gradient sampling module
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../../legged_gym_cmp"))
-
-from legged_gym.utils.traj_grad_sampling import TrajGradSampling, TrajGradSamplingCfg
-
-from dial_mpc.core.dial_config import DialConfig
-from dial_mpc.examples import examples
-from dial_mpc.utils.io_utils import get_example_path, load_dataclass_from_dict
-import dial_mpc.envs as dial_envs
-import brax.envs as brax_envs
-from brax.io import html
-from jax import numpy as jnp
-import jax
-import functools
-
+import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
 plt.rcParams['text.usetex'] = False  # Disable LaTeX
 plt.rcParams['font.family'] = 'DejaVu Sans'  # Use a standard font
+
+import jax
+import jax.numpy as jnp
+import torch
+import brax
+from brax import envs as brax_envs
+from brax.io import html
+import flask
+from tqdm import tqdm
+import art
+import emoji
+import time
+import yaml
+import functools
+
+# Import the standalone trajectory sampling module
+sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
+from traj_sampling import TrajGradSampling, TrajGradSamplingCfg
+
+from dial_mpc.core.dial_config import DialConfig
+from dial_mpc import envs as dial_envs
+from dial_mpc.examples import examples
+from dial_mpc.utils.io_utils import get_example_path, load_dataclass_from_dict
 
 # Set matplotlib to not use LaTeX and use a safe style
 try:
@@ -74,7 +75,7 @@ class MBDPITest:
         self.traj_cfg.trajectory_opt.compute_predictions = True
         
         # Disable RL warmstart as requested
-        self.traj_cfg.rl_warmstart.enable = False
+        # self.traj_cfg.rl_warmstart.enable = False
         
         # Initialize trajectory gradient sampling
         # Use CPU/CUDA device based on availability
@@ -82,7 +83,7 @@ class MBDPITest:
         print(f"Using device: {self.device}")
         
         # For this test, we'll use a single environment (no batch)
-        self.num_envs = 1
+        self.num_envs = args.Hsample 
         self.main_env_indices = [0]
         
         # Time step (should match environment dt)
