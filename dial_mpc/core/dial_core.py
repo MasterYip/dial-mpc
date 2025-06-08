@@ -322,8 +322,6 @@ def main():
     if not os.path.exists(dial_config.output_dir):
         os.makedirs(dial_config.output_dir)
 
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-
     # Plot mean trajectory rewards
     plt.rcParams['text.usetex'] = False
     plt.figure(figsize=(10, 6))
@@ -335,9 +333,9 @@ def main():
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(os.path.join(dial_config.output_dir, f"{timestamp}_reward_comparison.pdf"))
-    plt.savefig(os.path.join(dial_config.output_dir, f"{timestamp}_reward_comparison.png"), dpi=300)
-    print(f"Reward plot saved to {dial_config.output_dir}/{timestamp}_reward_comparison.pdf")
+    plt.savefig(os.path.join(dial_config.output_dir, "reward_comparison.pdf"))
+    plt.savefig(os.path.join(dial_config.output_dir, "reward_comparison.png"), dpi=300)
+    print(f"Reward plot saved to {dial_config.output_dir}/reward_comparison.pdf")
 
     # Plot individual reward components if available
     if reward_components_history:
@@ -357,9 +355,9 @@ def main():
                 plt.grid(True, alpha=0.3)
 
             plt.tight_layout()
-            plt.savefig(os.path.join(dial_config.output_dir, f"{timestamp}_reward_components.pdf"))
-            plt.savefig(os.path.join(dial_config.output_dir, f"{timestamp}_reward_components.png"), dpi=300)
-            print(f"Reward components plot saved to {dial_config.output_dir}/{timestamp}_reward_components.pdf")
+            plt.savefig(os.path.join(dial_config.output_dir, "reward_components.pdf"))
+            plt.savefig(os.path.join(dial_config.output_dir, "reward_components.png"), dpi=300)
+            print(f"Reward components plot saved to {dial_config.output_dir}/reward_components.pdf")
 
             # Also create a single plot with all components
             plt.figure(figsize=(12, 8))
@@ -374,9 +372,9 @@ def main():
             plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
-            plt.savefig(os.path.join(dial_config.output_dir, f"{timestamp}_all_reward_components.pdf"))
-            plt.savefig(os.path.join(dial_config.output_dir, f"{timestamp}_all_reward_components.png"), dpi=300)
-            print(f"All reward components plot saved to {dial_config.output_dir}/{timestamp}_all_reward_components.pdf")
+            plt.savefig(os.path.join(dial_config.output_dir, "all_reward_components.pdf"))
+            plt.savefig(os.path.join(dial_config.output_dir, "all_reward_components.png"), dpi=300)
+            print(f"All reward components plot saved to {dial_config.output_dir}/all_reward_components.pdf")
 
     # Also plot just the mean trajectory rewards
     plt.figure(figsize=(10, 6))
@@ -386,9 +384,9 @@ def main():
     plt.title('Mean Trajectory Rewards During Optimization')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(os.path.join(dial_config.output_dir, f"{timestamp}_mean_traj_rewards.pdf"))
-    plt.savefig(os.path.join(dial_config.output_dir, f"{timestamp}_mean_traj_rewards.png"), dpi=300)
-    print(f"Mean trajectory rewards plot saved to {dial_config.output_dir}/{timestamp}_mean_traj_rewards.pdf")
+    plt.savefig(os.path.join(dial_config.output_dir, "mean_traj_rewards.pdf"))
+    plt.savefig(os.path.join(dial_config.output_dir, "mean_traj_rewards.png"), dpi=300)
+    print(f"Mean trajectory rewards plot saved to {dial_config.output_dir}/mean_traj_rewards.pdf")
 
     # host webpage with flask
     print("Processing rollout for visualization")
@@ -401,7 +399,7 @@ def main():
 
     # save the html file
     with open(
-        os.path.join(dial_config.output_dir, f"{timestamp}_brax_visualization.html"),
+        os.path.join(dial_config.output_dir, "brax_visualization.html"),
         "w",
     ) as f:
         f.write(webpage)
@@ -424,19 +422,10 @@ def main():
         xdata.append(infos[i]["xbar"][-1])
     data = jnp.array(data)
     xdata = jnp.array(xdata)
-    jnp.save(os.path.join(dial_config.output_dir, f"{timestamp}_states"), data)
-    jnp.save(os.path.join(dial_config.output_dir, f"{timestamp}_predictions"), xdata)
+    jnp.save(os.path.join(dial_config.output_dir, "states"), data)
+    jnp.save(os.path.join(dial_config.output_dir, "predictions"), xdata)
 
-    # Save reward data
-    jnp.save(os.path.join(dial_config.output_dir, f"{timestamp}_mean_traj_rewards"), jnp.array(mean_traj_rewards))
-    jnp.save(os.path.join(dial_config.output_dir, f"{timestamp}_env_rewards"), jnp.array(rews))
-
-    # Save reward components data
-    if reward_components_history:
-        for component_name, values in reward_components_history.items():
-            jnp.save(os.path.join(dial_config.output_dir, f"{timestamp}_{component_name}"), jnp.array(values))
-
-    print(f"Reward data saved to {dial_config.output_dir}/{timestamp}_*_rewards.npy")
+    print(f"Visualization and data saved to {dial_config.output_dir}/")
 
     @app.route("/")
     def index():

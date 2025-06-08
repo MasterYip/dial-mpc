@@ -249,16 +249,16 @@ class UnitreeGo2Env(BaseEnv):
 
         # Store reward components in metrics for debugging
         metrics = {
-            "reward_gaits": reward_gaits,
-            "reward_air_time": reward_air_time,
-            "reward_pos": reward_pos,
-            "reward_upright": reward_upright,
-            "reward_yaw": reward_yaw,
-            "reward_vel": reward_vel,
-            "reward_ang_vel": reward_ang_vel,
-            "reward_height": reward_height,
-            "reward_energy": reward_energy,
-            "reward_alive": reward_alive,
+            "reward_gaits": reward_gaits * 0.1,
+            # "reward_air_time": reward_air_time,
+            # "reward_pos": reward_pos,
+            "reward_upright": reward_upright * 0.5,
+            "reward_yaw": reward_yaw * 0.3,
+            "reward_vel": reward_vel * 1.0,
+            "reward_ang_vel": reward_ang_vel * 1.0,
+            "reward_height": reward_height * 1.0,
+            # "reward_energy": reward_energy,
+            # "reward_alive": reward_alive,
             "reward_total": reward,
         }
 
