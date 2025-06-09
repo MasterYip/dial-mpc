@@ -39,14 +39,14 @@ from traj_sampling.traj_grad_sampling import TrajGradSampling, TrajGradSamplingC
 
 class JAXSplineTrajGradSampling(TrajGradSampling):
     """Extended TrajGradSampling class that uses JAX spline interpolation.
-    
+
     This class inherits from TrajGradSampling and overrides the conversion methods
     to use JAX spline interpolation instead of PyTorch linear interpolation.
     """
-    
+
     def __init__(self, cfg, device, num_envs, num_actions, dt, main_env_indices, args: DialConfig):
         """Initialize with JAX spline interpolation capabilities.
-        
+
         Args:
             cfg: Configuration object for trajectory optimization
             device: Device for computations
@@ -57,68 +57,68 @@ class JAXSplineTrajGradSampling(TrajGradSampling):
             args: DialConfig containing horizon parameters
         """
         super().__init__(cfg, device, num_envs, num_actions, dt, main_env_indices)
-        
+
         self.args = args
         self.nu = num_actions
-        
+
         # Initialize JAX spline interpolation functions
         self._init_jax_spline_functions()
-        
+
         print(f"JAXSplineTrajGradSampling initialized with JAX spline interpolation")
-    
+
     def _init_jax_spline_functions(self):
         """Initialize JAX spline interpolation functions like in the original dial_core.py"""
         from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
-        
+
         # Initialize time steps for interpolation (same as original MBDPI)
         self.ctrl_dt = 0.02
         self.step_us = jnp.linspace(0, self.ctrl_dt * self.args.Hsample, self.args.Hsample + 1)
         self.step_nodes = jnp.linspace(0, self.ctrl_dt * self.args.Hsample, self.args.Hnode + 1)
         self.node_dt = self.ctrl_dt * (self.args.Hsample) / (self.args.Hnode)
-        
+
         # Create JAX spline interpolation functions (same as original MBDPI)
         @functools.partial(jax.jit, static_argnums=(0,))
         def jax_node2u(self, nodes):
             spline = InterpolatedUnivariateSpline(self.step_nodes, nodes, k=2)
             us = spline(self.step_us)
             return us
-        
+
         @functools.partial(jax.jit, static_argnums=(0,))
         def jax_u2node(self, us):
             spline = InterpolatedUnivariateSpline(self.step_us, us, k=2)
             nodes = spline(self.step_nodes)
             return nodes
-        
+
         # Bind the methods to self
         self.jax_node2u = jax_node2u.__get__(self, type(self))
         self.jax_u2node = jax_u2node.__get__(self, type(self))
-        
+
         # Create vectorized versions (same as original MBDPI)
         self.jax_node2u_vmap = jax.jit(jax.vmap(self.jax_node2u, in_axes=(1), out_axes=(1)))
         self.jax_u2node_vmap = jax.jit(jax.vmap(self.jax_u2node, in_axes=(1), out_axes=(1)))
         self.jax_node2u_vvmap = jax.jit(jax.vmap(self.jax_node2u_vmap, in_axes=(0)))
         self.jax_u2node_vvmap = jax.jit(jax.vmap(self.jax_u2node_vmap, in_axes=(0)))
-    
+
     def jax_to_torch(self, jax_array):
         """Convert JAX array to PyTorch tensor."""
         if isinstance(jax_array, torch.Tensor):
             # Already a PyTorch tensor, just move to correct device
             return jax_array.to(self.device)
         return torch.from_numpy(np.array(jax_array)).to(self.device)
-    
+
     def torch_to_jax(self, torch_tensor):
         """Convert PyTorch tensor to JAX array."""
         if not isinstance(torch_tensor, torch.Tensor):
             # Already a JAX array or numpy array
             return jnp.array(torch_tensor)
         return jnp.array(torch_tensor.cpu().numpy())
-    
+
     def node2u(self, nodes: torch.Tensor) -> torch.Tensor:
         """Convert control nodes to dense control sequence using JAX spline interpolation.
-        
+
         Args:
             nodes: Control nodes as PyTorch tensor [Hnode+1, action_dim]
-            
+
         Returns:
             Dense control sequence as PyTorch tensor [Hsample+1, action_dim]
         """
@@ -126,13 +126,13 @@ class JAXSplineTrajGradSampling(TrajGradSampling):
         nodes_jax = self.torch_to_jax(nodes)
         us_jax = self.jax_node2u_vmap(nodes_jax)
         return self.jax_to_torch(us_jax)
-    
+
     def u2node(self, us: torch.Tensor) -> torch.Tensor:
         """Convert dense control sequence to control nodes using JAX spline interpolation.
-        
+
         Args:
             us: Dense control sequence as PyTorch tensor [Hsample+1, action_dim]
-            
+
         Returns:
             Control nodes as PyTorch tensor [Hnode+1, action_dim]
         """
@@ -140,13 +140,13 @@ class JAXSplineTrajGradSampling(TrajGradSampling):
         us_jax = self.torch_to_jax(us)
         nodes_jax = self.jax_u2node_vmap(us_jax)
         return self.jax_to_torch(nodes_jax)
-    
+
     def node2u_batch(self, nodes_batch: torch.Tensor) -> torch.Tensor:
         """Convert batch of control nodes to dense control sequences using JAX spline interpolation.
-        
+
         Args:
             nodes_batch: Batch of control nodes [batch_size, Hnode+1, action_dim]
-            
+
         Returns:
             Batch of dense control sequences [batch_size, Hsample+1, action_dim]
         """
@@ -154,13 +154,13 @@ class JAXSplineTrajGradSampling(TrajGradSampling):
         nodes_batch_jax = self.torch_to_jax(nodes_batch)
         us_batch_jax = self.jax_node2u_vvmap(nodes_batch_jax)
         return self.jax_to_torch(us_batch_jax)
-    
+
     def u2node_batch(self, us_batch: torch.Tensor) -> torch.Tensor:
         """Convert batch of dense control sequences to control nodes using JAX spline interpolation.
-        
+
         Args:
             us_batch: Batch of dense control sequences [batch_size, Hsample+1, action_dim]
-            
+
         Returns:
             Batch of control nodes [batch_size, Hnode+1, action_dim]
         """
@@ -168,33 +168,33 @@ class JAXSplineTrajGradSampling(TrajGradSampling):
         us_batch_jax = self.torch_to_jax(us_batch)
         nodes_batch_jax = self.jax_u2node_vvmap(us_batch_jax)
         return self.jax_to_torch(nodes_batch_jax)
-    
+
     def shift_nodetraj_batch(self, trajs: torch.Tensor, n_steps: int = 1) -> torch.Tensor:
         """Shift multiple trajectories by n time steps using JAX spline interpolation.
-        
+
         Args:
             trajs: Trajectories to shift [batch_size, length, action_dim]
             n_steps: Number of steps to shift by
-            
+
         Returns:
             Shifted trajectories [batch_size, length, action_dim]
         """
         # Convert to dense control sequences using JAX spline interpolation
         u_batch = self.node2u_batch(trajs)
-        
+
         # Convert to JAX for shifting operations
         u_batch_jax = self.torch_to_jax(u_batch)
-        
+
         # Shift all dense controls by n steps using JAX operations
         u_batch_jax = jnp.roll(u_batch_jax, -n_steps, axis=1)
-        
+
         # Fill the last n_steps controls with zeros
         u_batch_jax = u_batch_jax.at[:, -n_steps:, :].set(0.0)
-        
+
         # Convert back to PyTorch and then to nodes using JAX spline interpolation
         u_batch_torch = self.jax_to_torch(u_batch_jax)
         shifted = self.u2node_batch(u_batch_torch)
-        
+
         return shifted
 
 
@@ -210,21 +210,21 @@ def rollout_us(step_env, state, us):
 
 class MBDPITest:
     """Test implementation of MBDPI using PyTorch trajectory gradient sampling.
-    
+
     This class maintains the same interface as the original MBDPI but uses
     PyTorch-based trajectory optimization instead of JAX for easier debugging
     and development.
     """
-    
+
     def __init__(self, args: DialConfig, env):
         self.args = args
         self.env = env
         self.nu = env.action_size
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
+
         # Add option to choose interpolation method
         self.use_jax_spline = getattr(args, 'use_jax_spline', True)  # Default to JAX spline
-        
+
         # Create trajectory gradient sampling configuration
         self.traj_cfg = TrajGradSamplingCfg()
         self.traj_cfg.trajectory_opt.horizon_samples = args.Hsample
@@ -237,13 +237,13 @@ class MBDPITest:
         self.traj_cfg.trajectory_opt.traj_diffuse_factor = args.traj_diffuse_factor
         self.traj_cfg.trajectory_opt.update_method = args.update_method
         self.traj_cfg.env.num_actions = self.nu
-        
+
         # Initialize trajectory gradient sampling module
         # We use a single main environment for testing
         num_envs = 1
         main_env_indices = [0]
         dt = 0.02  # Control timestep
-        
+
         # Choose the appropriate TrajGradSampling class based on interpolation method
         if self.use_jax_spline:
             self.traj_sampler = JAXSplineTrajGradSampling(
@@ -266,11 +266,11 @@ class MBDPITest:
                 main_env_indices=main_env_indices
             )
             interpolation_method = "PyTorch linear (base class)"
-        
+
         # Apply JAX JIT compilation to environment rollout functions (like in original dial_core.py)
         self.rollout_us = jax.jit(functools.partial(rollout_us, self.env.step))
         self.rollout_us_vmap = jax.jit(jax.vmap(self.rollout_us, in_axes=(None, 0)))
-        
+
         print(f"MBDPITest initialized with PyTorch trajectory optimization")
         print(f"Device: {self.device}")
         print(f"Interpolation method: {interpolation_method}")
@@ -283,63 +283,63 @@ class MBDPITest:
         if isinstance(jax_array, torch.Tensor):
             return jax_array.to(self.device)
         return torch.from_numpy(np.array(jax_array)).to(self.device)
-    
+
     def torch_to_jax(self, torch_tensor):
         """Convert PyTorch tensor to JAX array."""
         if not isinstance(torch_tensor, torch.Tensor):
             return jnp.array(torch_tensor)
         return jnp.array(torch_tensor.cpu().numpy())
-    
+
     def create_rollout_callback(self, state):
         """Create a rollout callback function for trajectory optimization.
-        
+
         Args:
             state: Current JAX environment state
-            
+
         Returns:
             Callback function that can evaluate trajectory batches
         """
         def rollout_callback(us_batch_torch):
             """Evaluate a batch of control sequences efficiently using JAX vectorization.
-            
+
             Args:
                 us_batch_torch: Batch of control sequences [batch_size, horizon, action_dim]
-                
+
             Returns:
                 Batch of trajectory rewards [batch_size, horizon]
             """
             # Convert entire batch to JAX at once (more efficient)
             us_batch_jax = self.torch_to_jax(us_batch_torch)
-            
+
             # Use JAX vectorized rollout for efficient batch evaluation
             # This is much faster than looping over individual trajectories
             rews_batch, _, _ = self.rollout_us_vmap(state, us_batch_jax)
-            
+
             # Convert results back to PyTorch
             rewards_batch = self.jax_to_torch(rews_batch)
-            
+
             return rewards_batch
-        
+
         return rollout_callback
-    
+
     def reverse_once(self, state, Ybar_i_jax, noise_scale_jax):
         """Perform one reverse diffusion step using PyTorch trajectory optimization.
-        
+
         Args:
             state: JAX environment state
             Ybar_i_jax: Current mean trajectory in JAX format
             noise_scale_jax: Noise scale in JAX format
-            
+
         Returns:
             Updated trajectory and info dictionary
         """
         # Convert JAX inputs to PyTorch
         Ybar_i_torch = self.jax_to_torch(Ybar_i_jax).unsqueeze(0)  # Add batch dimension
         noise_scale_torch = self.jax_to_torch(noise_scale_jax)
-        
+
         # Create rollout callback
         rollout_callback = self.create_rollout_callback(state)
-        
+
         # Use trajectory gradient sampling to optimize
         updated_traj_torch = self.traj_sampler.eval_all_traj_grad(
             mean_trajs=Ybar_i_torch,
@@ -347,20 +347,20 @@ class MBDPITest:
             noise_scale=noise_scale_torch,
             n_samples=self.args.Nsample
         )
-        
+
         # Convert back to JAX
         Ybar_updated = self.torch_to_jax(updated_traj_torch.squeeze(0))
-        
+
         # Evaluate the updated trajectory to get additional info
         us_updated = self.traj_sampler.node2u(updated_traj_torch.squeeze(0))
         us_updated_jax = self.torch_to_jax(us_updated)
         rews, pipeline_states, metrics_seq = self.rollout_us(state, us_updated_jax)
-        
+
         # Extract state information for visualization
         qbar = pipeline_states.q
         qdbar = pipeline_states.qd
         xbar = pipeline_states.x.pos
-        
+
         # Process reward components from metrics if available
         mean_reward_components = {}
         if isinstance(metrics_seq, dict) and len(metrics_seq) > 0:
@@ -368,7 +368,7 @@ class MBDPITest:
             for key in reward_keys:
                 component_values = metrics_seq[key]
                 mean_reward_components[key] = component_values[0]  # Get first timestep
-        
+
         # Create info dictionary
         info = {
             "rews": rews,
@@ -380,24 +380,24 @@ class MBDPITest:
             "reward_components": mean_reward_components,
         }
         return Ybar_updated, info
-    
+
     def reverse(self, state, YN, rng=None):
         """Run the full reverse diffusion process using PyTorch trajectory optimization.
-        
+
         Args:
             state: JAX environment state
             YN: Initial trajectory (typically zeros)
             rng: Random number generator (unused in PyTorch version)
-            
+
         Returns:
             Optimized trajectory
         """
         Yi = YN
-        
+
         # Use PyTorch trajectory optimization for the full reverse process
         Yi_torch = self.jax_to_torch(Yi).unsqueeze(0)  # Add batch dimension
         rollout_callback = self.create_rollout_callback(state)
-        
+
         # Perform trajectory optimization with the specified number of diffusion steps
         n_diffuse = self.args.Ndiffuse
         self.traj_sampler.optimize_all_trajectories(
@@ -405,19 +405,19 @@ class MBDPITest:
             n_diffuse=n_diffuse,
             initial=False
         )
-        
+
         # Get the optimized trajectory
         optimized_traj = self.traj_sampler.node_trajectories[0]  # Get first (and only) trajectory
         Yi_optimized = self.torch_to_jax(optimized_traj)
-        
+
         return Yi_optimized
-    
+
     def shift(self, Y):
         """Shift trajectory by one timestep.
-        
+
         Args:
             Y: Trajectory to shift
-            
+
         Returns:
             Shifted trajectory
         """
@@ -427,33 +427,33 @@ class MBDPITest:
             Y_torch.unsqueeze(0), n_steps=1
         ).squeeze(0)
         return self.torch_to_jax(Y_shifted_torch)
-    
+
     def shift_Y_from_u(self, u, n_step):
         """Shift trajectory from control sequence.
-        
+
         Args:
             u: Control sequence
             n_step: Number of steps to shift
-            
+
         Returns:
             Shifted trajectory in node representation
         """
         # Convert to PyTorch
         u_torch = self.jax_to_torch(u)
-        
+
         # Shift the control sequence
         u_shifted = torch.roll(u_torch, -n_step, dims=0)
         u_shifted[-n_step:] = 0.0  # Zero out the last n_step controls
-        
+
         # Convert to node representation
         Y_shifted_torch = self.traj_sampler.u2node(u_shifted)
-        
+
         return self.torch_to_jax(Y_shifted_torch)
 
 
 def main():
     """Main function implementing the same logic as the original JAX version."""
-    
+
     def reverse_scan(state_Y0, factor):
         """Scan function for diffusion steps."""
         state, Y0 = state_Y0
@@ -501,7 +501,7 @@ def main():
     env = brax_envs.get_environment(dial_config.env_name, config=env_config)
     reset_env = jax.jit(env.reset)
     step_env = jax.jit(env.step)
-    
+
     # Create MBDPITest instead of MBDPI
     mbdpi = MBDPITest(dial_config, env)
 
@@ -521,7 +521,7 @@ def main():
     state = state_init
     us = []
     infos = []
-    
+
     with tqdm(range(Nstep), desc="Rollout") as pbar:
         for t in pbar:
             # Forward single step
@@ -539,18 +539,18 @@ def main():
                 print("Performing initial optimization with PyTorch trajectory sampling")
 
             t0 = time.time()
-            
+
             # Create noise factors for diffusion steps
             traj_diffuse_factors = []
             for i in range(n_diffuse):
                 factor = mbdpi.traj_sampler.sigma_control * (dial_config.traj_diffuse_factor ** i)
                 traj_diffuse_factors.append(factor)
-            
+
             # Perform diffusion steps
             current_state = (state, Y0)
             for i, factor in enumerate(traj_diffuse_factors):
                 current_state, info = reverse_scan(current_state, factor)
-            
+
             # Extract the final optimized trajectory
             _, Y0 = current_state
 
@@ -649,7 +649,7 @@ def main():
     import flask
 
     app = flask.Flask(__name__)
-    
+
     # Get environment system and timestep properly with better fallback handling
     try:
         if hasattr(env, 'sys'):
@@ -664,7 +664,7 @@ def main():
                 env_sys = None
     except:
         env_sys = None
-    
+
     # Get timestep with fallback
     try:
         if hasattr(env, 'dt'):
@@ -673,7 +673,7 @@ def main():
             env_dt = 0.02  # Standard 50Hz control rate
     except:
         env_dt = 0.02
-    
+
     if env_sys is not None:
         webpage = html.render(
             env_sys.tree_replace({"opt.timestep": env_dt}), rollout, 1080, True
@@ -709,7 +709,7 @@ def main():
         else:
             # Fallback for missing xdata
             xdata.append(jnp.zeros((3,)))
-    
+
     data = jnp.array(data)
     xdata = jnp.array(xdata)
     jnp.save(os.path.join(dial_config.output_dir, "states"), data)
