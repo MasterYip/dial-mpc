@@ -35,7 +35,6 @@ from typing import Dict, List, Tuple, Any, Optional, Union
 sys.path.append('/home/user/CodeSpace/Python/PredictiveDiffusionPlanner_Dev/')
 
 from traj_sampling.traj_grad_sampling import TrajGradSampling, TrajGradSamplingCfg
-TRAJ_SAMPLING_AVAILABLE = True
 
 
 class JAXSplineTrajGradSampling(TrajGradSampling):
@@ -170,33 +169,33 @@ class JAXSplineTrajGradSampling(TrajGradSampling):
         nodes_batch_jax = self.jax_u2node_vvmap(us_batch_jax)
         return self.jax_to_torch(nodes_batch_jax)
     
-    # def shift_nodetraj_batch(self, trajs: torch.Tensor, n_steps: int = 1) -> torch.Tensor:
-    #     """Shift multiple trajectories by n time steps using JAX spline interpolation.
+    def shift_nodetraj_batch(self, trajs: torch.Tensor, n_steps: int = 1) -> torch.Tensor:
+        """Shift multiple trajectories by n time steps using JAX spline interpolation.
         
-    #     Args:
-    #         trajs: Trajectories to shift [batch_size, length, action_dim]
-    #         n_steps: Number of steps to shift by
+        Args:
+            trajs: Trajectories to shift [batch_size, length, action_dim]
+            n_steps: Number of steps to shift by
             
-    #     Returns:
-    #         Shifted trajectories [batch_size, length, action_dim]
-    #     """
-    #     # Convert to dense control sequences using JAX spline interpolation
-    #     u_batch = self.node2u_batch(trajs)
+        Returns:
+            Shifted trajectories [batch_size, length, action_dim]
+        """
+        # Convert to dense control sequences using JAX spline interpolation
+        u_batch = self.node2u_batch(trajs)
         
-    #     # Convert to JAX for shifting operations
-    #     u_batch_jax = self.torch_to_jax(u_batch)
+        # Convert to JAX for shifting operations
+        u_batch_jax = self.torch_to_jax(u_batch)
         
-    #     # Shift all dense controls by n steps using JAX operations
-    #     u_batch_jax = jnp.roll(u_batch_jax, -n_steps, axis=1)
+        # Shift all dense controls by n steps using JAX operations
+        u_batch_jax = jnp.roll(u_batch_jax, -n_steps, axis=1)
         
-    #     # Fill the last n_steps controls with zeros
-    #     u_batch_jax = u_batch_jax.at[:, -n_steps:, :].set(0.0)
+        # Fill the last n_steps controls with zeros
+        u_batch_jax = u_batch_jax.at[:, -n_steps:, :].set(0.0)
         
-    #     # Convert back to PyTorch and then to nodes using JAX spline interpolation
-    #     u_batch_torch = self.jax_to_torch(u_batch_jax)
-    #     shifted = self.u2node_batch(u_batch_torch)
+        # Convert back to PyTorch and then to nodes using JAX spline interpolation
+        u_batch_torch = self.jax_to_torch(u_batch_jax)
+        shifted = self.u2node_batch(u_batch_torch)
         
-    #     return shifted
+        return shifted
 
 
 def rollout_us(step_env, state, us):

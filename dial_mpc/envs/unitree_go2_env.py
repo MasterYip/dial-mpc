@@ -225,15 +225,15 @@ class UnitreeGo2Env(BaseEnv):
         reward_alive = 1.0 - state.done
         # reward
         reward = (
-            reward_gaits * 0.1
+            # reward_gaits * 0.1
             + reward_air_time * 0.0
             + reward_pos * 0.0
             + reward_upright * 0.5
-            + reward_yaw * 0.3
+            # + reward_yaw * 0.3
             # + reward_pose * 0.0
             + reward_vel * 1.0
-            + reward_ang_vel * 1.0
-            + reward_height * 1.0
+            # + reward_ang_vel * 1.0
+            # + reward_height * 1.0
             + reward_energy * 0.00
             + reward_alive * 0.0
         )
