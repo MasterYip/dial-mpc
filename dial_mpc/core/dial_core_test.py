@@ -255,7 +255,7 @@ class MBDPITest:
                 main_env_indices=main_env_indices,
                 args=args
             )
-            interpolation_method = "JAX spline (derived class)"
+            traj_grad_sampler = "JAXSplineTrajGradSampling"
         else:
             self.traj_sampler = TrajGradSampling(
                 cfg=self.traj_cfg,
@@ -265,7 +265,7 @@ class MBDPITest:
                 dt=dt,
                 main_env_indices=main_env_indices
             )
-            interpolation_method = "PyTorch linear (base class)"
+            traj_grad_sampler = "TrajGradSampling"
 
         # Apply JAX JIT compilation to environment rollout functions (like in original dial_core.py)
         self.rollout_us = jax.jit(functools.partial(rollout_us, self.env.step))
@@ -273,7 +273,7 @@ class MBDPITest:
 
         print(f"MBDPITest initialized with PyTorch trajectory optimization")
         print(f"Device: {self.device}")
-        print(f"Interpolation method: {interpolation_method}")
+        print(f"Traj Grad Sampler: {traj_grad_sampler}")
         print(f"Horizon samples: {args.Hsample}, Horizon nodes: {args.Hnode}")
         print(f"Num samples: {args.Nsample}, Update method: {args.update_method}")
         print(f"JAX JIT compiled rollout functions for improved performance")
@@ -317,7 +317,6 @@ class MBDPITest:
 
             # Convert results back to PyTorch
             rewards_batch = self.jax_to_torch(rews_batch)
-
             return rewards_batch
 
         return rollout_callback

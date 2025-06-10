@@ -4,7 +4,7 @@ output_dir: unitree_go2_trot
 n_steps: 400
 
 env_name: unitree_go2_walk
-Nsample: 512
+Nsample: 256
 Hsample: 16
 Hnode: 4
 Ndiffuse: 2
@@ -13,7 +13,7 @@ temp_sample: 0.05
 horizon_diffuse_factor: 0.9
 traj_diffuse_factor: 0.5
 update_method: avwbfo
-use_jax_spline: true
+use_jax_spline: false
 
 # Base environment
 dt: 0.02
