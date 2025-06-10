@@ -31,9 +31,6 @@ import torch
 import numpy as np
 from typing import Dict, List, Tuple, Any, Optional, Union
 
-# Import trajectory gradient sampling module
-sys.path.append('/home/user/CodeSpace/Python/PredictiveDiffusionPlanner_Dev/')
-
 from traj_sampling.traj_grad_sampling import TrajGradSampling, TrajGradSamplingCfg
 
 
